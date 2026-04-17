@@ -1,0 +1,19 @@
+# Node modules
+node_modules/
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+krusch_memory_data/
+*krusch_memory_data/
+
+# OS
+.DS_Store
+Thumbs.db
+GEMINI_INFLIGHT.md

@@ -1,0 +1,53 @@
+{
+  "name": "krusch-memory-mcp",
+  "version": "0.1.1",
+  "type": "module",
+  "description": "A persistent, local-first semantic memory MCP server for IDEs, featuring dual SQLite/PostgreSQL support.",
+  "main": "src/index.js",
+  "bin": {
+    "krusch-memory": "./src/index.js",
+    "krusch-memory-mcp": "./src/index.js",
+    "krusch-memory-demo": "./src/demo.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kruschdev/krusch_memory_mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "ai",
+    "memory",
+    "claude",
+    "cursor",
+    "llm",
+    "sqlite",
+    "postgres",
+    "pgvector"
+  ],
+  "author": "kruschdev",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/kruschdev/krusch_memory_mcp/issues"
+  },
+  "homepage": "https://github.com/kruschdev/krusch_memory_mcp#readme",
+  "files": [
+    "src",
+    "schema.sql",
+    "README.md",
+    "LICENSE",
+    "install.sh",
+    "Dockerfile",
+    "docker-compose.yml"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.20.0",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1"
+  }
+}
