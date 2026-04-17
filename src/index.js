@@ -113,6 +113,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "health_check",
+        description: "Verify that the Hivemind Memory MCP server is alive and functioning.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
         name: "search_memory",
         description: "Search the persistent IDE database for past lessons, bugs, priorities, or project outcomes via semantic embeddings.",
         inputSchema: {
@@ -140,6 +148,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const embeddingArray = await embedText(content);
       
+      console.error(`[Hivemind Memory] 📝 Storing new memory in category: ${category}...`);
+      
       if (DB_MODE === 'postgres') {
         const client = await pgPool.connect();
         try {
@@ -153,16 +163,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       } else {
         await sqliteDb.run(`
-          INSERT INTO ide_agent_memory (category, content, embedding)
+          INSERT INTO hivemind_memory (category, content, embedding)
           VALUES (?, ?, ?)
         `, [category, content, JSON.stringify(embeddingArray)]);
       }
 
+      console.error(`[Hivemind Memory] ✅ Successfully stored memory.`);
       return { content: [{ type: "text", text: `[Hivemind Memory] ✅ Successfully saved memory to category: ${category}` }] };
 
     } else if (request.params.name === "search_memory") {
       const { category, query: searchQuery, limit = 3 } = args;
       if (!category || !searchQuery) throw new McpError(ErrorCode.InvalidParams, "Missing params");
+
+      console.error(`[Hivemind Memory] 🔍 Searching category '${category}' for: "${searchQuery}"...`);
 
       const embeddingArray = await embedText(searchQuery);
 
@@ -205,6 +218,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       return { content: [{ type: "text", text: output }] };
 
+    } else if (request.params.name === "health_check") {
+      return { content: [{ type: "text", text: `[Hivemind Memory] 🟢 Server is healthy. Mode: ${DB_MODE}` }] };
     } else {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
     }

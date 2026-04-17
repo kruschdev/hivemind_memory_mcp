@@ -3,9 +3,15 @@
 This is a Model Context Protocol (MCP) server that provides your IDE AI assistants (like Claude Desktop or Cursor) with long-term, semantic memory. Instead of your agent forgetting previous bugs, lessons, or project outcomes when you close the editor, it can retrieve them using vector embeddings.
 
 ## Features
-- Native semantic search (Cosine Similarity).
-- Pluggable Database engines (SQLite or PostgreSQL/pgvector).
-- 100% local embedding generation via Ollama (No API keys needed).
+- **Native semantic search** (Cosine Similarity).
+- **Pluggable Database engines** (SQLite or PostgreSQL/pgvector).
+- **100% local embedding generation** via Ollama (No API keys needed).
+- **Health Checks & Logging** built-in.
+
+## Why Hivemind?
+Most MCP memory servers either rely on heavy cloud APIs or complex graph databases. Hivemind is built specifically for serious local setups with multiple small models. It gives you dual-DB flexibility:
+- **SQLite** for ultra-fast, zero-dependency local setups (~10k memories).
+- **PostgreSQL** for enterprise scale when your swarms log every interaction.
 
 ## Prerequisites
 
@@ -17,11 +23,18 @@ Because this MCP generates embeddings 100% locally to protect your codebase priv
    ollama pull nomic-embed-text
    ```
 
-## Installation
+## Installation & Setup
 
-```bash
-npm install
-```
+1. **Install globally:**
+   ```bash
+   npm install -g .
+   ```
+   *This links the `hivemind-memory` command globally on your system.*
+
+2. **Or run via npx/local script:**
+   ```bash
+   npm install
+   ```
 
 ## Database Modes
 
@@ -55,8 +68,8 @@ Add this to your `claude_desktop_config.json`:
 {
   "mcpServers": {
     "hivemind-memory": {
-      "command": "node",
-      "args": ["/absolute/path/to/hivemind-memory-mcp/src/index.js"],
+      "command": "hivemind-memory",
+      "args": [],
       "env": {
         "DB_MODE": "sqlite",
         "OLLAMA_URL": "http://localhost:11434",
@@ -73,8 +86,8 @@ If you spun up the `pgvector` docker container and want to use it instead, add t
 {
   "mcpServers": {
     "hivemind-memory": {
-      "command": "node",
-      "args": ["/absolute/path/to/hivemind-memory-mcp/src/index.js"],
+      "command": "hivemind-memory",
+      "args": [],
       "env": {
         "DB_MODE": "postgres",
         "DATABASE_URL": "postgres://postgres:postgres@localhost:5441/hivemind_memory",
@@ -87,6 +100,44 @@ If you spun up the `pgvector` docker container and want to use it instead, add t
 ```
 
 ---
+
+## Examples
+
+**Adding a Memory:**
+```json
+{
+  "name": "add_memory",
+  "arguments": {
+    "category": "lessons",
+    "content": "The codebase requires all user prompts to be sanitized before entering the DB."
+  }
+}
+```
+
+**Recalling a Memory:**
+```json
+{
+  "name": "search_memory",
+  "arguments": {
+    "category": "lessons",
+    "query": "sanitize user prompt"
+  }
+}
+```
+*Output:*
+```text
+=== 🧠 Memory Retrieval: lessons ===
+
+--- Match (Score: 0.89) ---
+The codebase requires all user prompts to be sanitized before entering the DB.
+```
+
+---
+
+## Roadmap
+- [ ] Auto-tagging of memories.
+- [ ] Memory decay mechanisms (fading out older, less relevant facts).
+- [ ] Direct multi-tool calling support.
 
 ## About the Project
 **Hivemind Memory MCP** was built by [kruschdev](https://github.com/kruschdev) as part of the Krusch Homelab ecosystem. It is designed to bridge the gap between ephemeral IDE chat sessions and true, persistent agentic memory.

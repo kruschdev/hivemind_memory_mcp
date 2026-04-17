@@ -1,18 +1,23 @@
 {
   "name": "hivemind-memory-mcp",
-  "version": "1.0.0",
+  "version": "0.1.0",
+  "type": "module",
   "description": "A persistent, local-first semantic memory MCP server for IDEs, featuring dual SQLite/PostgreSQL support.",
-  "main": "index.js",
+  "main": "src/index.js",
+  "bin": {
+    "hivemind-memory": "./src/index.js"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "kruschdev",
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^17.4.2",
     "pg": "^8.20.0",
+    "sqlite": "^5.1.1",
     "sqlite3": "^6.0.1"
   }
 }
