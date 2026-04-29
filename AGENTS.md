@@ -38,4 +38,5 @@ Instead of polluting the project root with dozens of markdown files, agents shou
 - `.agent/rules/project-rules.md` — A single distilled file containing strict project-specific constraints (e.g., framework versions, styling rules).
 - `.agent/workflows/close.md` — Step-by-step instructions for the `/close` workflow (dictates exactly when and how the agent should call the `add_memory` tool to document bugs and outcomes).
 - `.agent/workflows/continue.md` — Step-by-step instructions for the `/continue` workflow (dictates exactly how the agent should read the `INFLIGHT.md` state file and call `search_memory`).
+- `.agent/workflows/maintenance.md` — Instructions for memory maintenance. When memories become too bloated or redundant, the agent should proactively call `consolidate_memories` to merge overlapping facts, or `delete_memory`/`update_memory` to prune invalid architectural assumptions.
 - `.agent/skills/` — Custom markdown files acting as specialized tools or execution wrappers for the project.

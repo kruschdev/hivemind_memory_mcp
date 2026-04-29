@@ -25,6 +25,7 @@ const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const EMBED_MODEL = process.env.EMBED_MODEL || "nomic-embed-text";
 const AUTO_TAG = process.env.AUTO_TAG === "true";
 const TAG_MODEL = process.env.TAG_MODEL || "llama3.2";
+const SUMMARIZE_MODEL = process.env.SUMMARIZE_MODEL || TAG_MODEL;
 const DECAY_RATE = parseFloat(process.env.DECAY_RATE || "0.01");
 
 let pgPool = null;
@@ -130,6 +131,33 @@ async function generateTags(text) {
 }
 
 /**
+ * Summarize memories using Ollama.
+ */
+async function summarizeMemories(texts) {
+  const combined = texts.map((t, i) => `[Memory ${i+1}]: ${t}`).join('\n\n');
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: SUMMARIZE_MODEL,
+        prompt: `You are an AI assistant managing your own episodic memory. Review the following related memories and consolidate them into a single, concise memory. Merge new facts, remove outdated or redundant information, and keep all important technical details. Do not include introductory text, just the consolidated memory.\n\nMemories to consolidate:\n${combined}`,
+        stream: false
+      })
+    });
+    
+    if (!res.ok) {
+      throw new Error(`Ollama Generation returned ${res.status}`);
+    }
+    
+    const data = await res.json();
+    return data.response.trim();
+  } catch (err) {
+    throw new Error(`Summarization failed: ${err.message}`);
+  }
+}
+
+/**
  * Cosine Similarity for SQLite array comparisons
  */
 function cosineSimilarity(vecA, vecB) {
@@ -190,6 +218,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["category", "query"]
         }
+      },
+      {
+        name: "delete_memory",
+        description: "Delete a specific memory from the database by its ID. Use this to prune outdated or incorrect memories.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "number", description: "The ID of the memory to delete (returned from search_memory)." }
+          },
+          required: ["id"]
+        }
+      },
+      {
+        name: "update_memory",
+        description: "Update the content of an existing memory by its ID. Will re-compute embeddings and tags.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "number", description: "The ID of the memory to update." },
+            content: { type: "string", description: "The new content for the memory." },
+            tags: { type: "array", items: { type: "string" }, description: "Optional explicit tags." }
+          },
+          required: ["id", "content"]
+        }
+      },
+      {
+        name: "consolidate_memories",
+        description: "Fetch all memories for a specific category (and optional project), use an LLM to summarize them into a single concise memory, and replace the old ones. Use this to prevent vector DB bloat.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
+            project: { type: "string", description: "Optional. Limit consolidation to a specific project." }
+          },
+          required: ["category"]
+        }
       }
     ]
   };
@@ -249,13 +313,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const embeddingStr = `[${embeddingArray.join(',')}]`;
           const res = await client.query(`
             WITH semantic_matches AS (
-              SELECT project, content, tags, created_at, embedding <=> $1::vector as distance
+              SELECT id, project, content, tags, created_at, embedding <=> $1::vector as distance
               FROM krusch_memory
               WHERE category = $2
               ORDER BY embedding <=> $1::vector
               LIMIT 100
             )
             SELECT 
+              id,
               project,
               content, 
               tags, 
@@ -270,7 +335,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           client.release();
         }
       } else {
-        const rows = await sqliteDb.all(`SELECT project, content, tags, created_at, embedding FROM krusch_memory WHERE category = ?`, [category]);
+        const rows = await sqliteDb.all(`SELECT id, project, content, tags, created_at, embedding FROM krusch_memory WHERE category = ?`, [category]);
         const now = new Date();
         const scoredRows = rows.map(r => {
           const dbVec = JSON.parse(r.embedding);
@@ -279,6 +344,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const baseSimilarity = cosineSimilarity(embeddingArray, dbVec) + (active_project && r.project === active_project ? 0.1 : 0);
           const similarity = baseSimilarity * Math.exp(-DECAY_RATE * ageInDays);
           return {
+            id: r.id,
             project: r.project,
             content: r.content,
             tags: r.tags,
@@ -302,9 +368,143 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const dateStr = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : 'unknown';
         const projectStr = r.project ? ` | Project: ${r.project}` : '';
-        output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | Date: ${dateStr}${projectStr}${tagsStr} ---\n${r.content}\n`;
+        output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ID: ${r.id} | Date: ${dateStr}${projectStr}${tagsStr} ---\n${r.content}\n`;
       }
       return { content: [{ type: "text", text: output }] };
+
+    } else if (request.params.name === "delete_memory") {
+      const { id } = args;
+      if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
+      
+      console.error(`[Krusch Memory] 🗑️ Deleting memory ID: ${id}...`);
+      if (DB_MODE === 'postgres') {
+        const client = await pgPool.connect();
+        try {
+          const res = await client.query(`DELETE FROM krusch_memory WHERE id = $1`, [id]);
+          if (res.rowCount === 0) return { content: [{ type: "text", text: `[Krusch Memory] ⚠️ Memory ID ${id} not found.` }] };
+        } finally {
+          client.release();
+        }
+      } else {
+        const res = await sqliteDb.run(`DELETE FROM krusch_memory WHERE id = ?`, [id]);
+        if (res.changes === 0) return { content: [{ type: "text", text: `[Krusch Memory] ⚠️ Memory ID ${id} not found.` }] };
+      }
+      console.error(`[Krusch Memory] ✅ Successfully deleted memory ID: ${id}.`);
+      return { content: [{ type: "text", text: `[Krusch Memory] ✅ Successfully deleted memory ID: ${id}` }] };
+
+    } else if (request.params.name === "update_memory") {
+      const { id, content, tags } = args;
+      if (!id || !content) throw new McpError(ErrorCode.InvalidParams, "Missing params");
+      
+      console.error(`[Krusch Memory] 🔄 Updating memory ID: ${id}...`);
+      const embeddingArray = await embedText(content);
+      let finalTags = tags ? JSON.stringify(tags) : null;
+      if (!finalTags && AUTO_TAG) {
+        finalTags = await generateTags(content);
+      }
+      
+      if (DB_MODE === 'postgres') {
+        const client = await pgPool.connect();
+        try {
+          const embeddingStr = `[${embeddingArray.join(',')}]`;
+          const res = await client.query(`
+            UPDATE krusch_memory SET content = $1, embedding = $2::vector, tags = $3, created_at = CURRENT_TIMESTAMP
+            WHERE id = $4
+          `, [content, embeddingStr, finalTags, id]);
+          if (res.rowCount === 0) return { content: [{ type: "text", text: `[Krusch Memory] ⚠️ Memory ID ${id} not found.` }] };
+        } finally {
+          client.release();
+        }
+      } else {
+        const res = await sqliteDb.run(`
+          UPDATE krusch_memory SET content = ?, embedding = ?, tags = ?, created_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, [content, JSON.stringify(embeddingArray), finalTags, id]);
+        if (res.changes === 0) return { content: [{ type: "text", text: `[Krusch Memory] ⚠️ Memory ID ${id} not found.` }] };
+      }
+      console.error(`[Krusch Memory] ✅ Successfully updated memory ID: ${id}.`);
+      return { content: [{ type: "text", text: `[Krusch Memory] ✅ Successfully updated memory ID: ${id}` }] };
+
+    } else if (request.params.name === "consolidate_memories") {
+      const { category, project } = args;
+      if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
+
+      console.error(`[Krusch Memory] 🗜️ Consolidating memories in category: '${category}' (Project: ${project || 'Global'})...`);
+      
+      let rows = [];
+      if (DB_MODE === 'postgres') {
+        const client = await pgPool.connect();
+        try {
+          if (project) {
+            const res = await client.query(`SELECT id, content FROM krusch_memory WHERE category = $1 AND project = $2`, [category, project]);
+            rows = res.rows;
+          } else {
+            const res = await client.query(`SELECT id, content FROM krusch_memory WHERE category = $1 AND project IS NULL`, [category]);
+            rows = res.rows;
+          }
+        } finally {
+          client.release();
+        }
+      } else {
+        if (project) {
+          rows = await sqliteDb.all(`SELECT id, content FROM krusch_memory WHERE category = ? AND project = ?`, [category, project]);
+        } else {
+          rows = await sqliteDb.all(`SELECT id, content FROM krusch_memory WHERE category = ? AND project IS NULL`, [category]);
+        }
+      }
+
+      if (rows.length <= 1) {
+        return { content: [{ type: "text", text: `[Krusch Memory] Not enough memories to consolidate (found ${rows.length}).` }] };
+      }
+
+      const textsToSummarize = rows.map(r => r.content);
+      const idsToDelete = rows.map(r => r.id);
+
+      console.error(`[Krusch Memory] Summarizing ${textsToSummarize.length} memories...`);
+      const consolidatedContent = await summarizeMemories(textsToSummarize);
+
+      console.error(`[Krusch Memory] Computing new embedding and tags...`);
+      const embeddingArray = await embedText(consolidatedContent);
+      let finalTags = null;
+      if (AUTO_TAG) {
+        finalTags = await generateTags(consolidatedContent);
+      }
+
+      if (DB_MODE === 'postgres') {
+        const client = await pgPool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query(`DELETE FROM krusch_memory WHERE id = ANY($1::int[])`, [idsToDelete]);
+          const embeddingStr = `[${embeddingArray.join(',')}]`;
+          await client.query(`
+            INSERT INTO krusch_memory (project, category, content, embedding, tags)
+            VALUES ($1, $2, $3, $4::vector, $5)
+          `, [project || null, category, consolidatedContent, embeddingStr, finalTags]);
+          await client.query('COMMIT');
+        } catch (e) {
+          await client.query('ROLLBACK');
+          throw e;
+        } finally {
+          client.release();
+        }
+      } else {
+        try {
+          await sqliteDb.run('BEGIN TRANSACTION');
+          const placeholders = idsToDelete.map(() => '?').join(',');
+          await sqliteDb.run(`DELETE FROM krusch_memory WHERE id IN (${placeholders})`, idsToDelete);
+          await sqliteDb.run(`
+            INSERT INTO krusch_memory (project, category, content, embedding, tags)
+            VALUES (?, ?, ?, ?, ?)
+          `, [project || null, category, consolidatedContent, JSON.stringify(embeddingArray), finalTags]);
+          await sqliteDb.run('COMMIT');
+        } catch (e) {
+          await sqliteDb.run('ROLLBACK');
+          throw e;
+        }
+      }
+
+      console.error(`[Krusch Memory] ✅ Successfully consolidated ${idsToDelete.length} memories into 1.`);
+      return { content: [{ type: "text", text: `[Krusch Memory] ✅ Successfully consolidated ${idsToDelete.length} memories into a single concise memory.` }] };
 
     } else if (request.params.name === "health_check") {
       return { content: [{ type: "text", text: `[Krusch Memory] 🟢 Server is healthy. Mode: ${DB_MODE}` }] };

@@ -97,6 +97,14 @@ To effectively use Krusch Memory, simply speak to your IDE agent normally, instr
 > **You:** "What are my goals for today?"
 > **Claude:** *[Calls `search_memory` with category='priorities']* "According to your priorities, you wanted to finish the CLI demo first."
 
+**Example 4: Memory Consolidation**
+> **You:** "We have too many repetitive notes about the database migration. Can you consolidate them?"
+> **Claude:** *[Calls `consolidate_memories` with category='activity']* "I've reviewed 12 overlapping memories regarding the DB migration and summarized them into a single, concise memory to preserve context without bloating the vector database."
+
+**Example 5: Pruning Invalid Memories**
+> **You:** "Actually, that previous fix didn't work."
+> **Claude:** *[Calls `search_memory`, then `delete_memory` with ID 42]* "I've deleted the incorrect architectural assumption from memory so I don't reference it in the future."
+
 ### How Does it Handle Similar Memories?
 If you add multiple slightly different memories over time, the MCP returns the **Top 3** highest cosine-similarity matches. Because Krusch includes **Exponential Temporal Decay**, if you have two very similar memories, the *newer* one will have a slightly higher score, preventing your agent from hallucinating based on outdated facts.
 
@@ -161,6 +169,7 @@ Krusch Memory offers two modes out of the box, controlled via the `DB_MODE` envi
 | `EMBED_MODEL`| The Ollama text-embedding model to use. | `nomic-embed-text` |
 | `AUTO_TAG` | Whether to use a local LLM to extract tags from memories. | `false` |
 | `TAG_MODEL` | The Ollama model to use for auto-tagging. | `llama3.2` |
+| `SUMMARIZE_MODEL` | The Ollama model to use for consolidating memories. Defaults to `TAG_MODEL`. | `llama3.2` |
 | `DECAY_RATE` | Exponential decay rate applied to older memories. | `0.01` |
 
 ### Troubleshooting
@@ -186,8 +195,6 @@ See the [docs/advanced-topics.md](docs/advanced-topics.md) file for:
 ## 🗺️ Roadmap
 
 Krusch is actively evolving. Our current short-term roadmap includes:
-- **`delete_memory` / `update_memory`:** Precise CRUD operations for agents to prune invalid assumptions.
-- **Memory Consolidation Tool:** An automated summarization utility to prevent vector DB bloat over time.
 - **Export/Import via JSON:** Easy human review and migration of memory states.
 - **Metadata Filtering:** Enhanced search by date range, specific tags, or confidence scores.
 
