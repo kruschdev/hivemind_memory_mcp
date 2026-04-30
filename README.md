@@ -111,7 +111,7 @@ If you add multiple slightly different memories over time, the MCP returns the *
 ### Soft Project Separation
 If you are managing multiple repositories, Krusch helps prevent cross-contamination of ideas. When your agent adds a memory, it can specify the `project` property. Later, when calling `search_memory` using `active_project`, Krusch does two things:
 1. **Context Boosting:** It applies a mathematical similarity boost to any memory matching the active project, ensuring project-specific fixes float above global advice.
-2. **Explicit Labeling:** The memory returned to the agent is explicitly labeled (e.g., `| Project: signet`), ensuring the LLM understands exactly which repository the historical context belongs to.
+2. **Explicit Labeling:** The memory returned to the agent is explicitly labeled (e.g., `| Project: auth-service`), ensuring the LLM understands exactly which repository the historical context belongs to.
 
 ## 🤝 The Agentic Brain (Synergy with PG-Git)
 
