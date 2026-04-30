@@ -128,7 +128,7 @@ This project is a dedicated node within the **Krusch DBOS Agentic Ecosystem**. T
 
 ## 🤝 The Agentic Brain (Synergy with PG-Git)
 
-Krusch Memory MCP is designed to be used in tandem with **[PG-Git](https://github.com/kruschdev/pg-git-mcp)** to solve the "Goldfish Memory" problem inherent to native AI IDEs (like Antigravity or Claude). While they both provide semantic memory to your AI agents, they serve two distinct halves of the "Agentic Brain":
+Krusch Memory MCP is designed to be used in tandem with **[PG-Git](https://github.com/kruschdev/pg-git-mcp)** to solve the "Goldfish Memory" problem inherent to native AI IDEs (like Antigravity, Claude, or Codex). While they both provide semantic memory to your AI agents, they serve two distinct halves of the "Agentic Brain":
 
 - **Krusch Memory MCP (The "Why")**: Acts as the episodic and procedural memory. It stores the *intent*—the architectural decisions, user preferences, bugs encountered, and high-level project goals.
 - **PG-Git (The "What" and "How")**: Acts as the structural and semantic memory of your code. It provides the actual implementation details, file structures, and algorithms.
