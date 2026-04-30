@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+  body {
+    margin: 0;
+    padding: 0;
+    width: 1280px;
+    height: 640px;
+    overflow: hidden;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    font-family: 'Inter', sans-serif;
+    color: #f8fafc;
+    display: flex;
+    box-sizing: border-box;
+    align-items: center;
+  }
+  .container {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    padding: 60px;
+    box-sizing: border-box;
+  }
+  .content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding-right: 60px;
+  }
+  .author {
+    font-size: 36px;
+    color: #94a3b8;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .title {
+    font-size: 72px;
+    font-weight: 800;
+    color: #ffffff;
+    margin: 0 0 32px 0;
+    line-height: 1.1;
+    background: -webkit-linear-gradient(#fff, #cbd5e1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .description {
+    font-size: 36px;
+    color: #cbd5e1;
+    line-height: 1.5;
+    margin: 0 0 40px 0;
+    font-weight: 400;
+  }
+  .image-container {
+    width: 500px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .image-container img {
+    width: 100%;
+    height: auto;
+    max-height: 500px;
+    object-fit: cover;
+    border-radius: 24px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="content">
+      <div class="author">kruschdev /</div>
+      <h1 class="title">krusch-memory-mcp</h1>
+      <p class="description">A persistent, local-first semantic memory MCP server for IDEs, featuring dual SQLite/PostgreSQL support.</p>
+    </div>
+    <div class="image-container">
+      <img src="file:///home/kruschdev/homelab/projects/krusch-memory-mcp/assets/banner.png" />
+    </div>
+  </div>
+</body>
+</html>
