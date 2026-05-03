@@ -8,6 +8,8 @@ npm-debug.log*
 
 # Databases
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 krusch_memory_data/

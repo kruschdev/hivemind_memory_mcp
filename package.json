@@ -9,8 +9,12 @@
     "krusch-memory-mcp": "./src/index.js",
     "krusch-memory-demo": "./src/demo.js"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
     "start": "node src/index.js"
   },
   "repository": {

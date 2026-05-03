@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   krusch_memory_db:

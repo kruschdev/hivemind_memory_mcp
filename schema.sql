@@ -14,3 +14,6 @@ CREATE TABLE IF NOT EXISTS krusch_memory (
 
 -- Create an index for vector similarity search (HNSW for speed)
 CREATE INDEX IF NOT EXISTS memory_embedding_idx ON krusch_memory USING hnsw (embedding vector_cosine_ops);
+
+-- Create an index for faster category filtering
+CREATE INDEX IF NOT EXISTS idx_category ON krusch_memory(category);

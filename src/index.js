@@ -13,9 +13,16 @@ const { Pool } = pkg;
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import dotenv from 'dotenv';
-import fs from 'fs';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 
 dotenv.config();
+
+// Read version from package.json to keep MCP server version in sync
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PKG_VERSION = JSON.parse(readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8')).version;
 
 // Configuration
 const DB_MODE = process.env.DB_MODE || "sqlite"; // "sqlite" or "postgres"
@@ -27,6 +34,8 @@ const AUTO_TAG = process.env.AUTO_TAG === "true";
 const TAG_MODEL = process.env.TAG_MODEL || "llama3.2";
 const SUMMARIZE_MODEL = process.env.SUMMARIZE_MODEL || TAG_MODEL;
 const DECAY_RATE = parseFloat(process.env.DECAY_RATE || "0.01");
+const MAX_CONTENT_LENGTH = parseInt(process.env.MAX_CONTENT_LENGTH || "51200"); // 50KB default
+const LOG_PREFIX = '[krusch-memory]';
 
 let pgPool = null;
 let sqliteDb = null;
@@ -37,17 +46,27 @@ let sqliteDb = null;
 async function initDb() {
   if (DB_MODE === 'postgres') {
     pgPool = new Pool({ connectionString: PG_URL });
+    // Validate the connection eagerly — don't silently swallow failures
+    const client = await pgPool.connect();
     try {
-      await pgPool.query(`ALTER TABLE krusch_memory ADD COLUMN project VARCHAR(255)`);
-    } catch (e) {
-      // Ignore if column already exists
+      await client.query('SELECT 1');
+      // Safe schema migration — only catch "column already exists" (42701)
+      try {
+        await client.query(`ALTER TABLE krusch_memory ADD COLUMN project VARCHAR(255)`);
+      } catch (e) {
+        if (e.code !== '42701') throw e; // Re-throw if not "duplicate column"
+      }
+    } finally {
+      client.release();
     }
-    console.error(`[ide-memory-mcp] Connected to PostgreSQL at ${PG_URL}`);
+    console.error(`${LOG_PREFIX} Connected to PostgreSQL at ${PG_URL}`);
   } else {
     sqliteDb = await open({
       filename: SQLITE_FILE,
       driver: sqlite3.Database
     });
+    // Enable WAL mode for better concurrent read performance
+    await sqliteDb.exec('PRAGMA journal_mode=WAL');
     // Create sqlite schema if not exists
     await sqliteDb.exec(`
       CREATE TABLE IF NOT EXISTS krusch_memory (
@@ -71,8 +90,10 @@ async function initDb() {
     } catch (e) {
       // Ignore if column already exists
     }
+    // Add index for faster category filtering
+    await sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_category ON krusch_memory(category)`);
     
-    console.error(`[krusch-memory-mcp] Connected to local SQLite at ${SQLITE_FILE}`);
+    console.error(`${LOG_PREFIX} Connected to local SQLite at ${SQLITE_FILE}`);
   }
 }
 
@@ -125,7 +146,7 @@ async function generateTags(text) {
     const tags = data.response.split(',').map(t => t.trim()).filter(t => t.length > 0);
     return JSON.stringify(tags);
   } catch (err) {
-    console.error(`[Krusch Memory] Warning: Tag generation failed: ${err.message}`);
+    console.error(`${LOG_PREFIX} Warning: Tag generation failed: ${err.message}`);
     return null;
   }
 }
@@ -177,7 +198,7 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 // Setup MCP Server
-const server = new Server({ name: "krusch-memory-mcp", version: "1.0.0" }, { capabilities: { tools: {} } });
+const server = new Server({ name: "krusch-memory-mcp", version: PKG_VERSION }, { capabilities: { tools: {} } });
 
 // Register Tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -189,7 +210,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            project: { type: "string", description: "Optional. The name of the current project (e.g., 't3code-dbos'). Helps prevent cross-project memory confusion." },
+            project: { type: "string", description: "Optional. The name of the current project (e.g., 'krusch-dbos'). Helps prevent cross-project memory confusion." },
             category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
             content: { type: "string" },
             tags: { type: "array", items: { type: "string" }, description: "Optional tags. If omitted and AUTO_TAG is true, tags will be generated automatically." }
@@ -254,6 +275,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["category"]
         }
+      },
+      {
+        name: "list_memories",
+        description: "List all memories in a given category, optionally filtered by project. Returns memories ordered by most recent first. Useful for reviewing what the agent has stored.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
+            project: { type: "string", description: "Optional. Filter to only this project's memories." },
+            limit: { type: "number", default: 20, description: "Max results to return (default 20)." }
+          },
+          required: ["category"]
+        }
       }
     ]
   };
@@ -267,6 +301,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "add_memory") {
       const { category, content, tags, project } = args;
       if (!category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing params");
+      if (content.length > MAX_CONTENT_LENGTH) throw new McpError(ErrorCode.InvalidParams, `Content exceeds maximum length of ${MAX_CONTENT_LENGTH} bytes`);
 
       const embeddingArray = await embedText(content);
       
@@ -275,7 +310,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         finalTags = await generateTags(content);
       }
       
-      console.error(`[Krusch Memory] 📝 Storing new memory in category: ${category}...`);
+      console.error(`${LOG_PREFIX} 📝 Storing new memory in category: ${category}...`);
       
       if (DB_MODE === 'postgres') {
         const client = await pgPool.connect();
@@ -295,14 +330,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         `, [project || null, category, content, JSON.stringify(embeddingArray), finalTags]);
       }
 
-      console.error(`[Krusch Memory] ✅ Successfully stored memory.`);
-      return { content: [{ type: "text", text: `[Krusch Memory] ✅ Successfully saved memory to category: ${category}` }] };
+      console.error(`${LOG_PREFIX} ✅ Successfully stored memory.`);
+      return { content: [{ type: "text", text: `${LOG_PREFIX} ✅ Successfully saved memory to category: ${category}` }] };
 
     } else if (request.params.name === "search_memory") {
       const { category, query: searchQuery, limit = 3, active_project } = args;
       if (!category || !searchQuery) throw new McpError(ErrorCode.InvalidParams, "Missing params");
 
-      console.error(`[Krusch Memory] 🔍 Searching category '${category}' for: "${searchQuery}"...`);
+      console.error(`${LOG_PREFIX} 🔍 Searching category '${category}' for: "${searchQuery}"...`);
 
       const embeddingArray = await embedText(searchQuery);
 
@@ -376,27 +411,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { id } = args;
       if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
       
-      console.error(`[Krusch Memory] 🗑️ Deleting memory ID: ${id}...`);
+      console.error(`${LOG_PREFIX} 🗑️ Deleting memory ID: ${id}...`);
       if (DB_MODE === 'postgres') {
         const client = await pgPool.connect();
         try {
           const res = await client.query(`DELETE FROM krusch_memory WHERE id = $1`, [id]);
-          if (res.rowCount === 0) return { content: [{ type: "text", text: `[Krusch Memory] ⚠️ Memory ID ${id} not found.` }] };
+          if (res.rowCount === 0) return { content: [{ type: "text", text: `${LOG_PREFIX} ⚠️ Memory ID ${id} not found.` }] };
         } finally {
           client.release();
         }
       } else {
         const res = await sqliteDb.run(`DELETE FROM krusch_memory WHERE id = ?`, [id]);
-        if (res.changes === 0) return { content: [{ type: "text", text: `[Krusch Memory] ⚠️ Memory ID ${id} not found.` }] };
+        if (res.changes === 0) return { content: [{ type: "text", text: `${LOG_PREFIX} ⚠️ Memory ID ${id} not found.` }] };
       }
-      console.error(`[Krusch Memory] ✅ Successfully deleted memory ID: ${id}.`);
-      return { content: [{ type: "text", text: `[Krusch Memory] ✅ Successfully deleted memory ID: ${id}` }] };
+      console.error(`${LOG_PREFIX} ✅ Successfully deleted memory ID: ${id}.`);
+      return { content: [{ type: "text", text: `${LOG_PREFIX} ✅ Successfully deleted memory ID: ${id}` }] };
 
     } else if (request.params.name === "update_memory") {
       const { id, content, tags } = args;
       if (!id || !content) throw new McpError(ErrorCode.InvalidParams, "Missing params");
       
-      console.error(`[Krusch Memory] 🔄 Updating memory ID: ${id}...`);
+      console.error(`${LOG_PREFIX} 🔄 Updating memory ID: ${id}...`);
       const embeddingArray = await embedText(content);
       let finalTags = tags ? JSON.stringify(tags) : null;
       if (!finalTags && AUTO_TAG) {
@@ -411,7 +446,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             UPDATE krusch_memory SET content = $1, embedding = $2::vector, tags = $3, created_at = CURRENT_TIMESTAMP
             WHERE id = $4
           `, [content, embeddingStr, finalTags, id]);
-          if (res.rowCount === 0) return { content: [{ type: "text", text: `[Krusch Memory] ⚠️ Memory ID ${id} not found.` }] };
+          if (res.rowCount === 0) return { content: [{ type: "text", text: `${LOG_PREFIX} ⚠️ Memory ID ${id} not found.` }] };
         } finally {
           client.release();
         }
@@ -420,16 +455,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           UPDATE krusch_memory SET content = ?, embedding = ?, tags = ?, created_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `, [content, JSON.stringify(embeddingArray), finalTags, id]);
-        if (res.changes === 0) return { content: [{ type: "text", text: `[Krusch Memory] ⚠️ Memory ID ${id} not found.` }] };
+        if (res.changes === 0) return { content: [{ type: "text", text: `${LOG_PREFIX} ⚠️ Memory ID ${id} not found.` }] };
       }
-      console.error(`[Krusch Memory] ✅ Successfully updated memory ID: ${id}.`);
-      return { content: [{ type: "text", text: `[Krusch Memory] ✅ Successfully updated memory ID: ${id}` }] };
+      console.error(`${LOG_PREFIX} ✅ Successfully updated memory ID: ${id}.`);
+      return { content: [{ type: "text", text: `${LOG_PREFIX} ✅ Successfully updated memory ID: ${id}` }] };
 
     } else if (request.params.name === "consolidate_memories") {
       const { category, project } = args;
       if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
 
-      console.error(`[Krusch Memory] 🗜️ Consolidating memories in category: '${category}' (Project: ${project || 'Global'})...`);
+      console.error(`${LOG_PREFIX} 🗜️ Consolidating memories in category: '${category}' (Project: ${project || 'Global'})...`);
       
       let rows = [];
       if (DB_MODE === 'postgres') {
@@ -454,16 +489,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       if (rows.length <= 1) {
-        return { content: [{ type: "text", text: `[Krusch Memory] Not enough memories to consolidate (found ${rows.length}).` }] };
+        return { content: [{ type: "text", text: `${LOG_PREFIX} Not enough memories to consolidate (found ${rows.length}).` }] };
       }
 
       const textsToSummarize = rows.map(r => r.content);
       const idsToDelete = rows.map(r => r.id);
 
-      console.error(`[Krusch Memory] Summarizing ${textsToSummarize.length} memories...`);
+      console.error(`${LOG_PREFIX} Summarizing ${textsToSummarize.length} memories...`);
       const consolidatedContent = await summarizeMemories(textsToSummarize);
 
-      console.error(`[Krusch Memory] Computing new embedding and tags...`);
+      console.error(`${LOG_PREFIX} Computing new embedding and tags...`);
       const embeddingArray = await embedText(consolidatedContent);
       let finalTags = null;
       if (AUTO_TAG) {
@@ -503,18 +538,75 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
-      console.error(`[Krusch Memory] ✅ Successfully consolidated ${idsToDelete.length} memories into 1.`);
-      return { content: [{ type: "text", text: `[Krusch Memory] ✅ Successfully consolidated ${idsToDelete.length} memories into a single concise memory.` }] };
+      console.error(`${LOG_PREFIX} ✅ Successfully consolidated ${idsToDelete.length} memories into 1.`);
+      return { content: [{ type: "text", text: `${LOG_PREFIX} ✅ Successfully consolidated ${idsToDelete.length} memories into a single concise memory.` }] };
 
     } else if (request.params.name === "health_check") {
-      return { content: [{ type: "text", text: `[Krusch Memory] 🟢 Server is healthy. Mode: ${DB_MODE}` }] };
+      return { content: [{ type: "text", text: `${LOG_PREFIX} 🟢 Server is healthy. Mode: ${DB_MODE}, Version: ${PKG_VERSION}` }] };
+
+    } else if (request.params.name === "list_memories") {
+      const { category, project, limit = 20 } = args;
+      if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
+
+      let rows = [];
+      if (DB_MODE === 'postgres') {
+        const client = await pgPool.connect();
+        try {
+          if (project) {
+            const res = await client.query(`SELECT id, project, content, tags, created_at FROM krusch_memory WHERE category = $1 AND project = $2 ORDER BY created_at DESC LIMIT $3`, [category, project, limit]);
+            rows = res.rows;
+          } else {
+            const res = await client.query(`SELECT id, project, content, tags, created_at FROM krusch_memory WHERE category = $1 ORDER BY created_at DESC LIMIT $2`, [category, limit]);
+            rows = res.rows;
+          }
+        } finally {
+          client.release();
+        }
+      } else {
+        if (project) {
+          rows = await sqliteDb.all(`SELECT id, project, content, tags, created_at FROM krusch_memory WHERE category = ? AND project = ? ORDER BY created_at DESC LIMIT ?`, [category, project, limit]);
+        } else {
+          rows = await sqliteDb.all(`SELECT id, project, content, tags, created_at FROM krusch_memory WHERE category = ? ORDER BY created_at DESC LIMIT ?`, [category, limit]);
+        }
+      }
+
+      if (rows.length === 0) {
+        return { content: [{ type: "text", text: `${LOG_PREFIX} No memories found in category '${category}'.` }] };
+      }
+
+      let output = `=== 📋 Memory List: ${category} (${rows.length} results) ===\n`;
+      for (const r of rows) {
+        let tagsStr = '';
+        if (r.tags) {
+          try { tagsStr = ` [Tags: ${JSON.parse(r.tags).join(', ')}]`; } catch(e) {}
+        }
+        const dateStr = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : 'unknown';
+        const projectStr = r.project ? ` | Project: ${r.project}` : '';
+        output += `\n--- ID: ${r.id} | Date: ${dateStr}${projectStr}${tagsStr} ---\n${r.content}\n`;
+      }
+      return { content: [{ type: "text", text: output }] };
+
     } else {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
     }
   } catch (err) {
-    return { content: [{ type: "text", text: `[Error] ${err.message}` }], isError: true };
+    return { content: [{ type: "text", text: `${LOG_PREFIX} [Error] ${err.message}` }], isError: true };
   }
 });
+
+// Graceful Shutdown
+async function shutdown() {
+  console.error(`${LOG_PREFIX} Shutting down...`);
+  try {
+    if (pgPool) await pgPool.end();
+    if (sqliteDb) await sqliteDb.close();
+  } catch (e) {
+    console.error(`${LOG_PREFIX} Shutdown error: ${e.message}`);
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 // Start Server
 async function main() {
@@ -524,6 +616,6 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error("[Fatal]", err);
+  console.error(`${LOG_PREFIX} [Fatal] ${err.message}`);
   process.exit(1);
 });
