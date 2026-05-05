@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS krusch_memory (
     project VARCHAR(255),
     category VARCHAR(50) NOT NULL,
     content TEXT NOT NULL,
-    embedding vector(768), -- Default Nomic text embedding dimension
+    embedding vector(1536), -- Default Qwen 1.5b embedding dimension
     tags TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

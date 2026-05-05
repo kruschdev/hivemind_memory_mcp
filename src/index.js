@@ -29,7 +29,7 @@ const DB_MODE = process.env.DB_MODE || "sqlite"; // "sqlite" or "postgres"
 const PG_URL = process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5441/krusch_memory";
 const SQLITE_FILE = process.env.SQLITE_FILE || "./krusch_memory.db";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
-const EMBED_MODEL = process.env.EMBED_MODEL || "nomic-embed-text";
+const EMBED_MODEL = process.env.EMBED_MODEL || "qwen2.5-coder:1.5b";
 const AUTO_TAG = process.env.AUTO_TAG === "true";
 const TAG_MODEL = process.env.TAG_MODEL || "llama3.2";
 const SUMMARIZE_MODEL = process.env.SUMMARIZE_MODEL || TAG_MODEL;
